@@ -274,14 +274,19 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, addDoc, setDoc, deleteDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Configurações Iniciais com Proteção ---
-        const apiKey = "AIzaSyDkXovTYciSqZNSAfYCu8pyPHoObJRmX4Y";
+        // --- Configuração da API Key (Netlify) ---
+        const apiKey = "AIzaSyDkXovTYciSqZNSAfYCu8pyPHoObJRmX4Y"; 
+
         let db, auth, appId;
         let isFirebaseReady = false;
+        window.user = null;
+        window.selectedClientData = null;
+        window.selectedExercises = [];
+        window.allCustomExercises = [];
+        const standardExercises = ["Musculação", "Pilates", "Yoga", "Funcional", "Mobilidade"];
 
         async function startSystem() {
             try {
-                // Tentativa de carregar config
                 let firebaseConfig = null;
                 if (typeof __firebase_config !== 'undefined') {
                     firebaseConfig = JSON.parse(__firebase_config);
@@ -294,7 +299,6 @@
                     db = getFirestore(app);
                     auth = getAuth(app);
                     
-                    // Auth Listener
                     onAuthStateChanged(auth, (u) => {
                         if (u) {
                             window.user = u;
@@ -310,8 +314,7 @@
                 }
             } catch (e) {
                 console.warn("Firebase não disponível. Iniciando modo local.");
-                document.getElementById('auth-info').innerHTML = `<span style="color: #FFD700;">⚠ Modo Local Ativo</span>`;
-                // Interface já pode ser usada para cálculos mesmo sem DB
+                document.getElementById('auth-info').innerHTML = `<span style="color: #FFD700;">⚠ Modo Local Ativo (Sem Base de Dados)</span>`;
             }
         }
 
@@ -343,38 +346,10 @@
             }, (err) => console.error("Firestore Exercises Error:", err));
         }
 
-        // Variáveis Globais de Estado
-        window.user = null;
-        window.selectedClientData = null;
-        window.selectedExercises = [];
-        window.allCustomExercises = [];
-        const standardExercises = ["Musculação", "Pilates", "Yoga", "Funcional", "Mobilidade"];
-
         const displayMessage = (txt, isErr = false) => {
             const container = document.getElementById('message-container');
             container.innerHTML = `<div class="${isErr ? 'error' : 'success'}">${txt}</div>`;
             setTimeout(() => container.innerHTML = '', 4000);
-        };
-
-        window.deleteClient = async (id, event) => {
-            if (event) event.stopPropagation();
-            if (!window.user || !db || !confirm("Deseja apagar este aluno?")) return;
-            try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', window.user.uid, 'clients', id));
-                if (window.selectedClientData && window.selectedClientData.id === id) {
-                    window.selectedClientData = null;
-                    document.getElementById('client-form').reset();
-                }
-                displayMessage("Aluno removido.");
-            } catch (e) { displayMessage("Erro ao remover.", true); }
-        };
-
-        window.deleteExercise = async (id, event) => {
-            if (event) event.stopPropagation();
-            if (!window.user || !db) return;
-            try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', window.user.uid, 'exercises', id));
-            } catch (e) { displayMessage("Erro ao remover exercício.", true); }
         };
 
         function renderClientList(list) {
@@ -387,21 +362,6 @@
                     <button type="button" class="btn-delete" onclick="window.deleteClient('${c.id}', event)">Apagar</button>
                 </div>`).join('');
             window._clients = list;
-        }
-
-        function renderExerciseModal() {
-            let html = `<strong>Padrão:</strong>`;
-            standardExercises.forEach(ex => {
-                html += `<div class="list-item"><label><input type="checkbox" value="${ex}" class="ex-chk" ${window.selectedExercises.includes(ex)?'checked':''}> ${ex}</label></div>`;
-            });
-            html += `<br><strong>Personalizados:</strong>`;
-            window.allCustomExercises.forEach(ex => {
-                html += `<div class="list-item">
-                    <label><input type="checkbox" value="${ex.name}" class="ex-chk" ${window.selectedExercises.includes(ex.name)?'checked':''}> ${ex.name}</label>
-                    <button type="button" class="btn-delete" onclick="window.deleteExercise('${ex.id}', event)">X</button>
-                </div>`;
-            });
-            document.getElementById('exercise-list-content').innerHTML = html;
         }
 
         window.loadClient = (id) => {
@@ -426,8 +386,6 @@
 
         window.saveClient = async () => {
             if (!isFirebaseReady || !window.user) return displayMessage("Nuvem indisponível no momento.", true);
-            if (!document.getElementById('nome').value) return displayMessage("Nome obrigatório", true);
-            
             const data = {
                 nome: document.getElementById('nome').value,
                 objetivo_principal: document.getElementById('objetivo_principal').value,
@@ -440,27 +398,34 @@
                 exercicios: window.selectedExercises,
                 updatedAt: new Date().toISOString()
             };
-            const coll = collection(db, 'artifacts', appId, 'users', window.user.uid, 'clients');
             try {
+                const coll = collection(db, 'artifacts', appId, 'users', window.user.uid, 'clients');
                 if (window.selectedClientData) await setDoc(doc(coll, window.selectedClientData.id), data, { merge: true });
-                else {
-                    const dr = await addDoc(coll, data);
-                    window.selectedClientData = { id: dr.id, ...data };
-                }
-                displayMessage("Salvo com sucesso!");
-            } catch (e) { displayMessage("Erro ao salvar dados.", true); }
+                else await addDoc(coll, data);
+                displayMessage("Dados salvos!");
+            } catch (e) { displayMessage("Erro ao salvar.", true); }
         };
 
         window.openExerciseDB = () => { document.getElementById('exercise-modal').style.display = 'block'; renderExerciseModal(); };
         window.closeExerciseDB = () => document.getElementById('exercise-modal').style.display = 'none';
         
+        function renderExerciseModal() {
+            let html = `<strong>Padrão:</strong>`;
+            standardExercises.forEach(ex => {
+                html += `<div class="list-item"><label><input type="checkbox" value="${ex}" class="ex-chk" ${window.selectedExercises.includes(ex)?'checked':''}> ${ex}</label></div>`;
+            });
+            html += `<br><strong>Personalizados:</strong>`;
+            window.allCustomExercises.forEach(ex => {
+                html += `<div class="list-item"><label><input type="checkbox" value="${ex.name}" class="ex-chk" ${window.selectedExercises.includes(ex.name)?'checked':''}> ${ex.name}</label></div>`;
+            });
+            document.getElementById('exercise-list-content').innerHTML = html;
+        }
+
         window.addCustomExercise = async () => {
             const val = document.getElementById('new-exercise-input').value.trim();
-            if (!val || !window.user || !db) return;
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'users', window.user.uid, 'exercises'), { name: val });
-                document.getElementById('new-exercise-input').value = '';
-            } catch (e) { displayMessage("Erro ao adicionar.", true); }
+            if (!val || !isFirebaseReady) return;
+            await addDoc(collection(db, 'artifacts', appId, 'users', window.user.uid, 'exercises'), { name: val });
+            document.getElementById('new-exercise-input').value = '';
         };
 
         window.confirmExerciseSelection = () => {
@@ -469,17 +434,17 @@
             window.closeExerciseDB();
         };
 
-        window.openClientListModal = () => document.getElementById('client-list-modal').style.display = 'block';
-        
         window.updateGenerateButtonText = () => {
             const val = document.getElementById('periodization_weeks').value;
             document.getElementById('generate-plan-button').innerText = `Gerar Planilha (${val} Semanas)`;
         };
 
+        window.openClientListModal = () => document.getElementById('client-list-modal').style.display = 'block';
+
         document.getElementById('client-form').onsubmit = async (e) => {
             e.preventDefault();
             const out = document.getElementById('output');
-            out.innerHTML = "<em>⚙️ A IA está a processar os dados e a criar a sua periodização personalizada...</em>";
+            out.innerHTML = "<em>⚙️ Gerando periodização...</em>";
 
             const fMax = parseInt(document.getElementById('fc_max').value) || 190;
             const fRep = parseInt(document.getElementById('fc_repouso').value) || 60;
@@ -491,45 +456,28 @@
             const vcm = seg / 3.2; 
             const fmt = (s) => `${Math.floor(s/60)}:${Math.round(s%60).toString().padStart(2,'0')}`;
 
-            const hrZ = { 
-                z1:`${Math.round(res*.6+fRep)}-${Math.round(res*.7+fRep)}`, 
-                z2:`${Math.round(res*.7+fRep)}-${Math.round(res*.8+fRep)}`, 
-                z3:`${Math.round(res*.8+fRep)}-${Math.round(res*.9+fRep)}` 
-            };
-            const pcZ = { 
-                z1:`${fmt(vcm*1.3)}-${fmt(vcm*1.5)}`, 
-                z2:`${fmt(vcm*1.15)}-${fmt(vcm*1.3)}`, 
-                z3:`${fmt(vcm*1.05)}-${fmt(vcm*1.15)}` 
-            };
+            const hrZ = { z1:`${Math.round(res*.6+fRep)}-${Math.round(res*.7+fRep)}`, z2:`${Math.round(res*.7+fRep)}-${Math.round(res*.8+fRep)}`, z3:`${Math.round(res*.8+fRep)}-${Math.round(res*.9+fRep)}` };
+            const pcZ = { z1:`${fmt(vcm*1.3)}-${fmt(vcm*1.5)}`, z2:`${fmt(vcm*1.15)}-${fmt(vcm*1.3)}`, z3:`${fmt(vcm*1.05)}-${fmt(vcm*1.15)}` };
 
             const zonesOut = document.getElementById('heart-rate-zones');
             zonesOut.style.display = 'flex';
             zonesOut.innerHTML = `<h3>Zonas FC</h3>` + Object.entries(hrZ).map(([k,v]) => `<div class="zone-box">${k.toUpperCase()}: ${v} bpm</div>`).join('');
 
-            const obs = document.getElementById('observacoes').value;
-            const prompt = `Gere uma periodização de corrida de ${document.getElementById('periodization_weeks').value} semanas em Português de Portugal. 
-            Aluno: ${document.getElementById('nome').value}. Objetivo: ${document.getElementById('objetivo_principal').value}.
-            Observações (Lesões/Restrições): ${obs || "Nenhuma"}.
-            Pace Alvo Z2: ${pcZ.z2}. FC Alvo Z2: ${hrZ.z2} bpm. 
-            Dias de Treino: ${Array.from(document.querySelectorAll('input[name="dia_corrida"]:checked')).map(i=>i.value).join(', ')}.
-            Exercícios Complementares: ${window.selectedExercises.join(', ')}. 
-            Instrução: Use tabelas Markdown, detalhe os tipos de treino (intervalado, longo, regenerativo) e inclua dicas de intensidade baseadas nas zonas calculadas.`;
+            const prompt = `Gere uma periodização de corrida de ${document.getElementById('periodization_weeks').value} semanas. Aluno: ${document.getElementById('nome').value}. Objetivo: ${document.getElementById('objetivo_principal').value}. Pace Z2: ${pcZ.z2}. FC Z2: ${hrZ.z2}. Dias: ${Array.from(document.querySelectorAll('input[name="dia_corrida"]:checked')).map(i=>i.value).join(', ')}. Exercícios: ${window.selectedExercises.join(', ')}.`;
 
             try {
-                const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
-                const d = await r.json();
-                out.innerHTML = d.candidates?.[0]?.content?.parts?.[0]?.text || "A IA não conseguiu devolver uma resposta válida.";
-                if (isFirebaseReady) window.saveClient();
-            } catch (err) { 
-                out.innerHTML = "Erro ao contactar a IA. Verifique a sua ligação à internet."; 
+                const data = await response.json();
+                out.innerHTML = data.candidates?.[0]?.content?.parts?.[0]?.text || "Erro na resposta.";
+            } catch (err) {
+                out.innerHTML = "Erro ao contactar a IA.";
             }
         };
 
-        // Inicia o sistema após o carregamento do DOM
         window.addEventListener('load', startSystem);
     </script>
 </body>
