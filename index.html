@@ -274,8 +274,8 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, addDoc, setDoc, deleteDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Configuração da API Key (Netlify) ---
-        const apiKey = ""; 
+        // --- Configuração da API Key (IA) ---
+        const apiKey = "Coloque aqui uma chave de api do googel ai studio para a ia funcionar"; // Chave vazia conforme as instruções do ambiente
 
         let db, auth, appId;
         let isFirebaseReady = false;
@@ -287,33 +287,33 @@
 
         async function startSystem() {
             try {
-                let firebaseConfig = null;
-                if (typeof __firebase_config !== 'undefined') {
-                    firebaseConfig = JSON.parse(__firebase_config);
-                }
-
+                // Obter variáveis do ambiente global
+                const firebaseConfigRaw = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
                 appId = typeof __app_id !== 'undefined' ? __app_id : 'periodizacao-app';
 
-                if (firebaseConfig) {
+                if (firebaseConfigRaw) {
+                    const firebaseConfig = JSON.parse(firebaseConfigRaw);
                     const app = initializeApp(firebaseConfig);
                     db = getFirestore(app);
                     auth = getAuth(app);
                     
+                    // Listener de estado de autenticação
                     onAuthStateChanged(auth, (u) => {
                         if (u) {
                             window.user = u;
                             document.getElementById('auth-info').innerHTML = `<span style="color: #28a745;">✓ Online</span>`;
+                            isFirebaseReady = true;
                             setupListeners();
                         } else {
+                            // Se não houver usuário, tenta autenticar
                             handleAuth();
                         }
                     });
-                    isFirebaseReady = true;
                 } else {
-                    throw new Error("Config not found");
+                    throw new Error("Configuração Firebase não encontrada.");
                 }
             } catch (e) {
-                console.warn("Firebase não disponível. Iniciando modo local.");
+                console.warn("Erro ao iniciar Firebase:", e);
                 document.getElementById('auth-info').innerHTML = `<span style="color: #FFD700;">⚠ Modo Local Ativo (Sem Base de Dados)</span>`;
             }
         }
@@ -321,29 +321,37 @@
         async function handleAuth() {
             if (!auth) return;
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
+                const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                if (initialToken) {
+                    await signInWithCustomToken(auth, initialToken);
                 } else {
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                console.error("Auth falhou:", err);
-                document.getElementById('auth-info').innerHTML = `<span style="color: #dc3545;">Erro de Login</span>`;
+                console.error("Erro na autenticação:", err);
+                document.getElementById('auth-info').innerHTML = `<span style="color: #dc3545;">Erro de Autenticação</span>`;
             }
         }
 
         function setupListeners() {
             if (!window.user || !db) return;
             
-            onSnapshot(collection(db, 'artifacts', appId, 'users', window.user.uid, 'clients'), (snap) => {
+            // Ouvir lista de alunos (Privado)
+            const clientsPath = `artifacts/${appId}/users/${window.user.uid}/clients`;
+            onSnapshot(collection(db, clientsPath), (snap) => {
                 const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 renderClientList(list);
-            }, (err) => console.error("Firestore Clients Error:", err));
+            }, (err) => {
+                console.error("Erro Firestore Clientes:", err);
+                displayMessage("Erro de permissão ao ler alunos.", true);
+            });
 
-            onSnapshot(collection(db, 'artifacts', appId, 'users', window.user.uid, 'exercises'), (snap) => {
+            // Ouvir exercícios customizados (Privado)
+            const exercisesPath = `artifacts/${appId}/users/${window.user.uid}/exercises`;
+            onSnapshot(collection(db, exercisesPath), (snap) => {
                 window.allCustomExercises = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 if (document.getElementById('exercise-modal').style.display === 'block') renderExerciseModal();
-            }, (err) => console.error("Firestore Exercises Error:", err));
+            }, (err) => console.error("Erro Firestore Exercícios:", err));
         }
 
         const displayMessage = (txt, isErr = false) => {
@@ -384,8 +392,20 @@
             document.getElementById('client-list-modal').style.display = 'none';
         };
 
+        window.deleteClient = async (id, event) => {
+            event.stopPropagation();
+            if (!confirm("Deseja realmente apagar este aluno?")) return;
+            try {
+                const docRef = doc(db, `artifacts/${appId}/users/${window.user.uid}/clients`, id);
+                await deleteDoc(docRef);
+                displayMessage("Aluno removido.");
+            } catch (e) {
+                displayMessage("Erro ao remover.", true);
+            }
+        };
+
         window.saveClient = async () => {
-            if (!isFirebaseReady || !window.user) return displayMessage("Nuvem indisponível no momento.", true);
+            if (!isFirebaseReady || !window.user) return displayMessage("A aguardar ligação à nuvem...", true);
             const data = {
                 nome: document.getElementById('nome').value,
                 objetivo_principal: document.getElementById('objetivo_principal').value,
@@ -399,11 +419,17 @@
                 updatedAt: new Date().toISOString()
             };
             try {
-                const coll = collection(db, 'artifacts', appId, 'users', window.user.uid, 'clients');
-                if (window.selectedClientData) await setDoc(doc(coll, window.selectedClientData.id), data, { merge: true });
-                else await addDoc(coll, data);
-                displayMessage("Dados salvos!");
-            } catch (e) { displayMessage("Erro ao salvar.", true); }
+                const clientsColl = collection(db, `artifacts/${appId}/users/${window.user.uid}/clients`);
+                if (window.selectedClientData) {
+                    await setDoc(doc(clientsColl, window.selectedClientData.id), data, { merge: true });
+                } else {
+                    await addDoc(clientsColl, data);
+                }
+                displayMessage("Dados guardados com sucesso!");
+            } catch (e) { 
+                console.error(e);
+                displayMessage("Erro ao guardar dados no Firestore.", true); 
+            }
         };
 
         window.openExerciseDB = () => { document.getElementById('exercise-modal').style.display = 'block'; renderExerciseModal(); };
@@ -423,9 +449,14 @@
 
         window.addCustomExercise = async () => {
             const val = document.getElementById('new-exercise-input').value.trim();
-            if (!val || !isFirebaseReady) return;
-            await addDoc(collection(db, 'artifacts', appId, 'users', window.user.uid, 'exercises'), { name: val });
-            document.getElementById('new-exercise-input').value = '';
+            if (!val || !isFirebaseReady || !window.user) return;
+            try {
+                const exPath = `artifacts/${appId}/users/${window.user.uid}/exercises`;
+                await addDoc(collection(db, exPath), { name: val });
+                document.getElementById('new-exercise-input').value = '';
+            } catch (e) {
+                displayMessage("Erro ao adicionar exercício.", true);
+            }
         };
 
         window.confirmExerciseSelection = () => {
@@ -444,7 +475,7 @@
         document.getElementById('client-form').onsubmit = async (e) => {
             e.preventDefault();
             const out = document.getElementById('output');
-            out.innerHTML = "<em>⚙️ Gerando periodização...</em>";
+            out.innerHTML = "<em>⚙️ Gerando periodização com Inteligência Artificial...</em>";
 
             const fMax = parseInt(document.getElementById('fc_max').value) || 190;
             const fRep = parseInt(document.getElementById('fc_repouso').value) || 60;
@@ -463,18 +494,23 @@
             zonesOut.style.display = 'flex';
             zonesOut.innerHTML = `<h3>Zonas FC</h3>` + Object.entries(hrZ).map(([k,v]) => `<div class="zone-box">${k.toUpperCase()}: ${v} bpm</div>`).join('');
 
-            const prompt = `Gere uma periodização de corrida de ${document.getElementById('periodization_weeks').value} semanas. Aluno: ${document.getElementById('nome').value}. Objetivo: ${document.getElementById('objetivo_principal').value}. Pace Z2: ${pcZ.z2}. FC Z2: ${hrZ.z2}. Dias: ${Array.from(document.querySelectorAll('input[name="dia_corrida"]:checked')).map(i=>i.value).join(', ')}. Exercícios: ${window.selectedExercises.join(', ')}.`;
+            const prompt = `Gere uma periodização de corrida técnica de ${document.getElementById('periodization_weeks').value} semanas em português. Aluno: ${document.getElementById('nome').value}. Objetivo: ${document.getElementById('objetivo_principal').value}. Pace Z2: ${pcZ.z2}. FC Z2: ${hrZ.z2}. Dias: ${Array.from(document.querySelectorAll('input[name="dia_corrida"]:checked')).map(i=>i.value).join(', ')}. Exercícios complementares: ${window.selectedExercises.join(', ')}. Observações: ${document.getElementById('observacoes').value}.`;
 
             try {
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    body: JSON.stringify({ 
+                        contents: [{ parts: [{ text: prompt }] }],
+                        systemInstruction: { parts: [{ text: "Você é um treinador de corrida de elite. Gere planilhas detalhadas, seguras e motivadoras." }] }
+                    })
                 });
                 const data = await response.json();
-                out.innerHTML = data.candidates?.[0]?.content?.parts?.[0]?.text || "Erro na resposta.";
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                out.innerHTML = text ? text : "Erro na resposta da IA.";
             } catch (err) {
-                out.innerHTML = "Erro ao contactar a IA.";
+                console.error(err);
+                out.innerHTML = "Erro ao contactar o servidor de IA. Tente novamente.";
             }
         };
 
