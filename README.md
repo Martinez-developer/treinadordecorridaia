@@ -1,12 +1,12 @@
 # iaruncoach
 
-Projeto simples desenvolvido em HTML.
+Projeto desenvolvido em HTML.
 
 ## Objetivo
-Criar uma interface simples para auxiliar na criação de treinos para musculação,
-utilizando conceitos básicos de IA com apoio de ferramentas
-como o Gemini.
+Criar uma interface para auxiliar na criação de treinos para corrida,
+utilizando conceitos básicos de IA com apoio de ferramentas como o Gemini.
 
 ## Tecnologias
-- HTML
+- JAVA, HTML
 - Conceitos básicos de IA
+- Banco de dados Firebase.
